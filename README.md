@@ -1,105 +1,111 @@
 # 🛡️ Real-Time Violence Detection & Alert System
 
-This project provides a complete, real-time violence detection system using a Keras/MobileNetV2 model. When violence is detected, it automatically triggers a multi-channel alert, sending an **email with frame-grab evidence** and initiating an **immediate SMS and voice call** via Twilio.
-
-The system is built as two main components:
-1.  **Detector (`detect_violence.py`):** A lightweight client that uses OpenCV to watch a camera feed. It runs the Keras model for inference and is responsible for sending the email alert.
-2.  **Alert Server (`alert_server.py`):** A robust FastAPI server that receives a simple "ping" from the detector and handles all the Twilio API logic (SMS/Call).
-
-This decoupled, multithreaded architecture ensures that the camera feed **never lags** while the alerts are being sent.
-
-## 🏛️ System Architecture
-
-The two-part system works as follows:
-
-1.  The **Detector** (`detect_violence.py`) monitors the camera feed.
-2.  When `N` consecutive frames are classified as "Violence," it triggers an alert.
-3.  A **background thread** is immediately started to prevent camera lag.
-4.  This thread does two jobs:
-    * **Sends an email** (via Gmail) with the last 3 captured frames as attachments.
-    * **Sends an HTTP ping** to the `http://127.0.0.1:8000/alert` endpoint.
-5.  The **Alert Server** (`alert_server.py`), which is running constantly, receives this ping.
-6.  The server then executes its two tasks: sending an **SMS alert** and making a **voice call** using Twilio.
-
-
-
-## ✨ Key Features
-
-* **Real-Time Detection:** Uses a lightweight MobileNetV2 model for fast inference.
-* **Multi-Channel Alerts:** Notifies you via Email, SMS, and Voice Call.
-* **Image Proof:** The email alert automatically includes saved frames as attachments.
-* **No Lag:** Asynchronous (multithreaded) alert handling ensures the camera stream never freezes.
-* **Decoupled & Robust:** A separate FastAPI server handles critical API alerts, so the detector's only job is to detect.
-* **Secure:** All API keys and secrets are managed safely in a `.env` file.
+A professional, real-time surveillance system built using **MobileNetV2 (Keras/TFLite)** that detects violent activity from live video feeds and instantly triggers **Email**, **SMS**, and **Voice Call alerts** using **Twilio**.
 
 ---
 
-## 🚀 Getting Started
+## 🧠 Overview
 
-Follow these steps to set up and run the system.
+This system operates in two lightweight, decoupled components:
 
-### 1. Prerequisites
+1. **Detector (`detect_violence.py` / `pi_detector.py`)** – Monitors the camera feed in real-time and sends alerts when violence is detected.
+2. **Alert Server (`alert_server.py`)** – A FastAPI server that receives the alert signal and manages Twilio-based SMS and voice notifications.
 
-* Python 3.8+
-* A webcam
-* A Google Account (for sending email)
-* A Twilio Account (for SMS/Calls)
+**Architecture:**
 
-### 2. Installation
+```
+Camera → Detector → (Email + HTTP Ping) → Alert Server → (SMS + Call)
+```
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://your-repo-url/project.git
-    cd project
-    ```
+---
 
-2.  **Install all required libraries:**
-    (This uses the `requirements.txt` file you created)
-    ```bash
-    pip install -r requirements.txt
-    ```
+## ✨ Features
 
-3.  **Download Model Weights:**
-    Make sure your trained model file, `ModelWeights.weights.h5`, is in the main project folder.
+* ⚡ **Real-Time Detection:** Fast, accurate frame analysis with MobileNetV2 (TFLite on Raspberry Pi)
+* 📧 **Multi-Channel Alerts:** Automatic Email (with frame evidence), SMS, and Voice Call
+* 🧵 **No Lag:** Multithreaded design keeps camera feed smooth
+* 🔒 **Secure:** API keys and credentials stored safely in `.env`
+* 🍓 **Cross-Compatible:** Runs on Raspberry Pi or any PC with Python 3.8+
 
-### 3. Configuration (The `.env` File)
+---
 
-This is the most important step. Create a file named `.env` in the root of your project folder.
+## ⚙️ Installation
 
-1.  **Create the `.env` file:**
-    ```bash
-    # This is your .env file
-    # --- Twilio Secrets (for alert_server.py) ---
-    TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxx"
-    TWILIO_AUTH_TOKEN="your_auth_token_here"
-    TWILIO_PHONE_NUMBER="+15551234567"
-    TWIML_BIN_URL="[https://handler.twilio.com/twiml/xxxxx](https://handler.twilio.com/twiml/xxxxx)"
+### 1️⃣ Clone Repository & Install Dependencies
 
-    # --- Gmail Secret (for detect_violence.py) ---
-    GMAIL_APP_PASSWORD="your-16-char-app-password"
-    ```
+```bash
+git clone https://your-repo-url/project.git
+cd project
+pip install -r requirements.txt
+```
 
-2.  **Fill in your values:**
+Add your trained model file:
 
-    * **Twilio Values:** Get these from your [Twilio Dashboard](https://www.twilio.com/console).
-    * **`TWIML_BIN_URL`:** Log in to Twilio, go to "TwiML Bins," create a new bin, and paste this XML content. The URL it gives you is your `TWIML_BIN_URL`.
-        ```xml
-        <?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Say>
-            This is an automated security alert. A violence event has been detected at your location. Please check your cameras immediately.
-          </Say>
-        </Response>
-        ```
-    * **`GMAIL_APP_PASSWORD`:** You **cannot** use your regular password.
-        1.  Go to your Google Account and enable **2-Step Verification**.
-        2.  Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
-        3.  Generate a new 16-character password for "Mail" on "Other." Use this password.
+* PC: `ModelWeights.weights.h5`
+* Raspberry Pi: `model.tflite`
 
-### 4. Update Email Addresses
+### 2️⃣ Configure Environment
 
-In `detect_violence.py`, update the sender and receiver emails:
+Create a `.env` file in your project root:
+
+```bash
+TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxx"
+TWILIO_AUTH_TOKEN="your_auth_token"
+TWILIO_PHONE_NUMBER="+15551234567"
+TWIML_BIN_URL="https://handler.twilio.com/twiml/xxxxx"
+GMAIL_APP_PASSWORD="your-16-char-app-password"
+```
+
+**Note:** For Gmail, enable 2-Step Verification → [App Passwords](https://myaccount.google.com/apppasswords) → Generate a new 16-character password.
+
+### 3️⃣ Update Email Recipients
+
+In your detector script:
+
 ```python
-# --- Email Configuration ---
-SENDER_EMAIL = "your-email@gmail.com" # <-- YOUR GMAIL
-RECEIVER_EMAIL = "email-to-alert@example.com" # <-- WHERE TO SEND IT
+SENDER_EMAIL = "your@gmail.com"
+RECEIVER_EMAIL = "recipient@example.com"
+```
+
+---
+
+## 💻 Run on PC
+
+```bash
+# Terminal 1 – Start Alert Server
+python alert_server.py
+
+# Terminal 2 – Start Detector
+python detect_violence.py
+```
+
+When violence is detected → Email + SMS + Voice Call are triggered automatically.
+
+---
+
+## 🍓 Run on Raspberry Pi
+
+```bash
+pip3 install opencv-python requests python-dotenv fastapi uvicorn gpiozero tflite-runtime
+
+# Terminal 1 – Run Alert Server
+python3 alert_server.py
+
+# Terminal 2 – Run Pi Detector
+python3 pi_detector.py
+```
+
+(Optional) Connect an active buzzer to GPIO17 for instant hardware alerts.
+
+---
+
+## 🧰 Tech Stack
+
+* **TensorFlow Lite / Keras** – Model inference
+* **OpenCV** – Real-time camera processing
+* **FastAPI + Twilio** – Backend alerts
+* **GPIOZero** – Hardware control (Pi)
+* **Python-Dotenv** – Secure credential management
+
+---
+
