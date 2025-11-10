@@ -2,15 +2,12 @@ from fastapi import FastAPI
 import uvicorn
 import os
 from twilio.rest import Client
-from dotenv import load_dotenv # <-- 1. NEW IMPORT
+from dotenv import load_dotenv 
 
-load_dotenv() # <-- 2. NEW: LOAD ALL VARIABLES FROM .env
+load_dotenv() 
 
-# --- Twilio Configuration ---
 TO_PHONE_NUMBER = "+917206113301" # Phone number to alert
 
-# --- Load all secrets from environment variables ---
-# (These os.environ.get() calls now automatically read from your .env file)
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")

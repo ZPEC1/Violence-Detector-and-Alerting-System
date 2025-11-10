@@ -1,12 +1,9 @@
 import cv2
 import numpy as np
-import tensorflow as tf
 import requests
 import time
 import os
-import threading # <-- 1. NEW IMPORT
-
-# Email libraries
+import threading
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
@@ -14,54 +11,58 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from collections import deque 
-
-# Keras libraries
-from tensorflow.keras.layers import Input, Dense
-from tensorflow.keras.models import Model
-from tensorflow.keras.applications import MobileNetV2
-
 from dotenv import load_dotenv
+
+import tflite_runtime.interpreter as tflite 
+from gpiozero import Buzzer 
 
 load_dotenv() 
 
-# --- 1. Configuration ---
-CAMERA_SOURCE = 0
-MODEL_WEIGHTS_PATH = 'ModelWeights.weights.h5'
+
+CAMERA_SOURCE = 0 # 0 for default USB/PiCamera
+MODEL_FILE_PATH = 'model.tflite' 
 FASTAPI_SERVER_URL = "http://127.0.0.1:8000/alert"
 
-# --- Email Configuration ---
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SENDER_EMAIL = "zavik0914@gmail.com"
-RECEIVER_EMAIL = "zavik.khanchi@gmail.com"
+SENDER_EMAIL = "zavik0914@gmail.com" 
+RECEIVER_EMAIL = "ishmeet2004singh@gmail.com" 
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
 
-# --- Detection Logic ---
+
+BUZZER_PIN = 17 # The GPIO pin you wired to
+buzzer = Buzzer(BUZZER_PIN)
+
+
 IMG_SIZE = 128
 ColorChannels = 3
-CONF_THRESHOLD = 0.85
+CONF_THRESHOLD = 0.80
 FRAME_COUNT_THRESHOLD = 5
 FRAME_SAVE_COUNT = 3
-ALERT_COOLDOWN = 45
+ALERT_COOLDOWN = 60
 last_alert_time = 0
 
 frame_buffer = deque(maxlen=FRAME_SAVE_COUNT)
 
-# --- 2. Model Definition ---
-def load_model_structure():
-    # ... (This function is unchanged)
-    input_tensor = Input(shape=(IMG_SIZE, IMG_SIZE, ColorChannels))
-    baseModel = MobileNetV2(pooling='avg',
-                            include_top=False,
-                            input_tensor=input_tensor)
-    headModel = baseModel.output
-    headModel = Dense(1, activation="sigmoid")(headModel)
-    model = Model(inputs=baseModel.input, outputs=headModel)
-    return model
 
-# --- 3. Email Sending Function ---
+print("[INFO] Loading TFLite model...")
+interpreter = tflite.Interpreter(model_path=MODEL_FILE_PATH)
+interpreter.allocate_tensors()
+
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+input_shape = input_details[0]['shape'] # Should be [1, 128, 128, 3]
+
+print(f"[INFO] Model loaded. Input shape: {input_shape}")
+
+
+
 def send_email_with_frames(frames_to_send):
-    # ... (This function is unchanged)
+    """
+    This function sends the email with frame attachments.
+    """
     if not GMAIL_APP_PASSWORD:
         print("[ERROR] Gmail App Password not found. Check your .env file.")
         return
@@ -69,8 +70,8 @@ def send_email_with_frames(frames_to_send):
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
     msg['To'] = RECEIVER_EMAIL
-    msg['Subject'] = "!!! VIOLENCE ALERT DETECTED !!!"
-    body = "Violence detected by your security system. See attached frames for evidence."
+    msg['Subject'] = "!!! VIOLENCE ALERT !!!"
+    body = "Violence detected by your security system. See attached frames."
     msg.attach(MIMEText(body, 'plain'))
     temp_files = []
     try:
@@ -98,9 +99,10 @@ def send_email_with_frames(frames_to_send):
             if os.path.exists(f):
                 os.remove(f)
 
-# --- 4. Server Alert Function ---
 def send_alert_to_server():
-    # ... (This function is unchanged)
+    """
+    This function pings the FastAPI server.
+    """
     print(f"[INFO] Sending alert ping to server: {FASTAPI_SERVER_URL}")
     try:
         r = requests.post(FASTAPI_SERVER_URL)
@@ -111,24 +113,26 @@ def send_alert_to_server():
     except Exception as e:
         print(f"[ERROR] An unknown error occurred while pinging server: {e}")
 
-# --- 5. NEW: Wrapper Function for Threading ---
 def trigger_all_alerts(frames_to_send):
     """
-    This function runs in a separate thread so it doesn't block the camera.
+    This function runs in a separate thread.
+    It now ALSO controls the buzzer.
     """
     print("[THREAD] Alert thread started...")
-    # 1. Send the email with frames
-    send_email_with_frames(frames_to_send)
     
-    # 2. Ping the server to trigger SMS/Call
+    try:
+        print("[THREAD] Sounding buzzer...")
+        buzzer.on()
+        time.sleep(3) 
+        buzzer.off()
+    except Exception as e:
+        print(f"[ERROR] Could not sound buzzer: {e}")
+
+
+    send_email_with_frames(frames_to_send)
     send_alert_to_server()
     print("[THREAD] Alert thread finished.")
 
-# --- 6. Initialization ---
-print("[INFO] Loading Keras model structure...")
-model = load_model_structure()
-model.load_weights(MODEL_WEIGHTS_PATH)
-print("[INFO] Model weights loaded successfully.")
 
 print(f"[INFO] Connecting to camera source: {CAMERA_SOURCE}...")
 cap = cv2.VideoCapture(CAMERA_SOURCE)
@@ -139,7 +143,7 @@ if not cap.isOpened():
 detection_counter = 0
 print("[INFO] Starting violence detection... Press 'q' to quit.")
 
-# --- 7. Main Processing Loop ---
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -148,12 +152,24 @@ while True:
 
     frame_buffer.append(frame) 
 
-    frame_resized = cv2.resize(frame, (IMG_SIZE, IMG_SIZE))
+
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) 
+    frame_resized = cv2.resize(frame_rgb, (IMG_SIZE, IMG_SIZE))
     frame_normalized = frame_resized / 255.0
-    frame_batch = np.expand_dims(frame_normalized, axis=0)
     
-    prediction = model.predict(frame_batch, verbose=0)
+
+    frame_batch = np.expand_dims(frame_normalized, axis=0).astype(np.float32)
+    
+
+    interpreter.set_tensor(input_details[0]['index'], frame_batch)
+    
+
+    interpreter.invoke()
+    
+
+    prediction = interpreter.get_tensor(output_details[0]['index'])
     probability = prediction[0][0]
+    
 
     found_violence = False
     if probability >= CONF_THRESHOLD:
@@ -168,13 +184,13 @@ while True:
         detection_counter += 1
     else:
         detection_counter = 0
+    
 
     cv2.putText(frame, display_label, (20, 40), 
                 cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
     current_time = time.time()
     
-    # --- 8. MODIFIED: Alert Trigger Logic ---
     if (detection_counter >= FRAME_COUNT_THRESHOLD) and \
        ((current_time - last_alert_time) > ALERT_COOLDOWN):
         
@@ -182,26 +198,21 @@ while True:
         cv2.putText(frame, "!!! ALERTING !!!", (20, 80), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
         
-        # --- DO NOT CALL THE SLOW FUNCTIONS HERE ---
-        # send_email_with_frames(list(frame_buffer))  <-- REMOVED
-        # send_alert_to_server()                        <-- REMOVED
-        
-        # --- INSTEAD: Start the new thread ---
-        # We copy the buffer to ensure the thread has the correct frames
         frames_snapshot = list(frame_buffer) 
         alert_thread = threading.Thread(target=trigger_all_alerts, args=(frames_snapshot,))
         alert_thread.start()
         
-        # Reset cooldown and counter immediately
         last_alert_time = time.time()
         detection_counter = 0
+    
 
-    cv2.imshow("Violence Detection Stream (Press 'q' to quit)", frame)
+    cv2.imshow("Pi Violence Detection (Press 'q' to quit)", frame)
     
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# --- 9. Cleanup ---
+
 print("[INFO] Stopping detection and cleaning up...")
+buzzer.off() 
 cap.release()
 cv2.destroyAllWindows()
